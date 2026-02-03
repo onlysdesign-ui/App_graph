@@ -2,152 +2,218 @@ import { useMemo, useState } from 'react';
 import ReactFlow, { Background, Controls, type Edge, type Node, type NodeMouseHandler } from 'reactflow';
 import dagre from 'dagre';
 
-type RelatedTestSuite = {
-  id: string;
-  name: string;
-  lastStatus: 'passed' | 'failed';
-  path: string[];
-  lastRun: string;
-};
+type GraphArtifacts = Record<string, string>;
 
 type AppGraphNode = {
   id: string;
-  label: string;
   type: string;
-  personas: string[];
-  environments: string[];
-  coverage: boolean;
-  artifacts: string[];
-  relatedTestSuites: RelatedTestSuite[];
+  label: string;
+  path: string;
+  states: string[];
+  artifacts: GraphArtifacts;
+  coverage: {
+    visited: boolean;
+    visits: number;
+    coverageScore: number;
+  };
+  metadata: Record<string, string | number | boolean | string[]>;
 };
 
 type AppGraphEdge = {
   source: string;
   target: string;
+  type: string;
+  label: string;
+  conditions?: Record<string, string | number | boolean>;
 };
 
 type AppGraph = {
+  environment: string;
+  persona: string;
+  version: string;
   nodes: AppGraphNode[];
   edges: AppGraphEdge[];
 };
 
 const mockGraph: AppGraph = {
+  environment: 'staging',
+  persona: 'guest',
+  version: 'v2.3.14',
   nodes: [
     {
-      id: '/login',
-      label: '/login',
-      type: 'page',
-      personas: ['guest', 'user'],
-      environments: ['staging', 'production'],
-      coverage: true,
-      artifacts: ['screenshot', 'trace'],
-      relatedTestSuites: [
-        {
-          id: 'TS-10',
-          name: 'Авторизация',
-          lastStatus: 'passed',
-          path: ['/login', '/dashboard'],
-          lastRun: '2026-02-02T09:15:00Z',
-        },
-      ],
+      id: 'node-1',
+      type: 'route',
+      label: 'Home Page',
+      path: '/',
+      states: ['guest', 'logged-in'],
+      artifacts: {
+        screenshot: 'homepage_guest.png',
+        domSnapshot: 'HomePage.html',
+        trace: 'homepage_trace.zip',
+      },
+      coverage: {
+        visited: true,
+        visits: 6,
+        coverageScore: 0.8,
+      },
+      metadata: {
+        entryPoint: true,
+        stableSelectors: ["input[name='search_query']"],
+      },
     },
     {
-      id: '/cart',
-      label: '/cart',
-      type: 'page',
-      personas: ['user'],
-      environments: ['staging'],
-      coverage: true,
-      artifacts: ['screenshot'],
-      relatedTestSuites: [
-        {
-          id: 'TS-42',
-          name: 'Оплата заказов',
-          lastStatus: 'passed',
-          path: ['/login', '/cart', '/checkout', '/thank-you'],
-          lastRun: '2026-02-02T13:15:00Z',
-        },
-      ],
+      id: 'node-2',
+      type: 'state',
+      label: "Search Results: 'cats'",
+      path: '/results?search_query=cats',
+      states: ['guest'],
+      artifacts: {
+        screenshot: 'search_results_cats.png',
+        domSnapshot: 'SearchResultsPage.html',
+      },
+      coverage: {
+        visited: true,
+        visits: 4,
+        coverageScore: 0.65,
+      },
+      metadata: {
+        searchQuery: 'cats',
+        resultCount: 17,
+      },
     },
     {
-      id: '/checkout',
-      label: '/checkout',
-      type: 'page',
-      personas: ['guest', 'user'],
-      environments: ['staging'],
-      coverage: true,
-      artifacts: ['screenshot', 'trace'],
-      relatedTestSuites: [
-        {
-          id: 'TS-42',
-          name: 'Оплата заказов',
-          lastStatus: 'passed',
-          path: ['/login', '/cart', '/checkout', '/thank-you'],
-          lastRun: '2026-02-02T13:15:00Z',
-        },
-      ],
+      id: 'node-3',
+      type: 'route',
+      label: 'Video Player Page',
+      path: '/watch?v=abc123',
+      states: ['guest', 'logged-in'],
+      artifacts: {
+        screenshot: 'video_page_guest.png',
+        domSnapshot: 'VideoPage.html',
+        trace: 'video_trace.zip',
+      },
+      coverage: {
+        visited: true,
+        visits: 10,
+        coverageScore: 0.9,
+      },
+      metadata: {
+        videoTitle: 'Funny Cats Compilation',
+        videoId: 'abc123',
+      },
     },
     {
-      id: '/thank-you',
-      label: '/thank-you',
-      type: 'page',
-      personas: ['user'],
-      environments: ['staging', 'production'],
-      coverage: false,
-      artifacts: ['screenshot'],
-      relatedTestSuites: [
-        {
-          id: 'TS-42',
-          name: 'Оплата заказов',
-          lastStatus: 'failed',
-          path: ['/login', '/cart', '/checkout', '/thank-you'],
-          lastRun: '2026-02-03T08:05:00Z',
-        },
-      ],
+      id: 'node-4',
+      type: 'action',
+      label: 'Login with Test User',
+      path: '/login',
+      states: ['unauthenticated'],
+      artifacts: {
+        screenshot: 'login_success.png',
+      },
+      coverage: {
+        visited: true,
+        visits: 2,
+        coverageScore: 1.0,
+      },
+      metadata: {
+        loginMethod: 'OAuth',
+        provider: 'Google',
+      },
     },
     {
-      id: '/inventory',
-      label: '/inventory',
-      type: 'api',
-      personas: ['service'],
-      environments: ['staging', 'production'],
-      coverage: true,
-      artifacts: ['trace'],
-      relatedTestSuites: [
-        {
-          id: 'TS-77',
-          name: 'Синхронизация склада',
-          lastStatus: 'passed',
-          path: ['/inventory', '/checkout'],
-          lastRun: '2026-02-01T11:45:00Z',
-        },
-      ],
+      id: 'node-5',
+      type: 'action',
+      label: 'Like Video',
+      path: '/api/like',
+      states: ['logged-in'],
+      artifacts: {
+        trace: 'like_action_trace.zip',
+      },
+      coverage: {
+        visited: true,
+        visits: 2,
+        coverageScore: 1.0,
+      },
+      metadata: {
+        videoId: 'abc123',
+      },
     },
     {
-      id: '/dashboard',
-      label: '/dashboard',
-      type: 'page',
-      personas: ['user'],
-      environments: ['production'],
-      coverage: true,
-      artifacts: ['screenshot', 'trace', 'video'],
-      relatedTestSuites: [
-        {
-          id: 'TS-10',
-          name: 'Авторизация',
-          lastStatus: 'passed',
-          path: ['/login', '/dashboard'],
-          lastRun: '2026-02-02T09:15:00Z',
-        },
-      ],
+      id: 'node-6',
+      type: 'action',
+      label: 'Subscribe to Channel',
+      path: '/api/subscribe',
+      states: ['logged-in'],
+      artifacts: {},
+      coverage: {
+        visited: true,
+        visits: 1,
+        coverageScore: 1.0,
+      },
+      metadata: {
+        channelId: 'ch999',
+      },
+    },
+    {
+      id: 'node-7',
+      type: 'action',
+      label: 'Post Comment',
+      path: '/api/comment',
+      states: ['logged-in'],
+      artifacts: {
+        screenshot: 'comment_posted.png',
+      },
+      coverage: {
+        visited: true,
+        visits: 1,
+        coverageScore: 1.0,
+      },
+      metadata: {
+        commentText: 'Отличное видео!',
+      },
     },
   ],
   edges: [
-    { source: '/login', target: '/dashboard' },
-    { source: '/login', target: '/cart' },
-    { source: '/cart', target: '/checkout' },
-    { source: '/checkout', target: '/thank-you' },
-    { source: '/inventory', target: '/checkout' },
+    {
+      source: 'node-1',
+      target: 'node-2',
+      type: 'navigation',
+      label: "Search 'cats'",
+      conditions: {
+        input: 'cats',
+      },
+    },
+    {
+      source: 'node-2',
+      target: 'node-3',
+      type: 'navigation',
+      label: 'Click first result',
+    },
+    {
+      source: 'node-4',
+      target: 'node-1',
+      type: 'state-transition',
+      label: 'Login success',
+    },
+    {
+      source: 'node-3',
+      target: 'node-5',
+      type: 'action',
+      label: 'Click Like',
+    },
+    {
+      source: 'node-3',
+      target: 'node-6',
+      type: 'action',
+      label: 'Click Subscribe',
+    },
+    {
+      source: 'node-3',
+      target: 'node-7',
+      type: 'action',
+      label: 'Add Comment',
+    },
   ],
 };
 
@@ -185,7 +251,8 @@ const buildGraph = (graph: AppGraph) => {
   const nodeMap = new Map<string, Node>();
   const edgeMap = new Map<string, Edge>();
 
-  const startNode = graph.nodes[0]?.id;
+  const entryNode = graph.nodes.find((node) => node.metadata.entryPoint)?.id;
+  const startNode = entryNode ?? graph.nodes[0]?.id;
 
   graph.nodes.forEach((node) => {
     const isStart = node.id === startNode;
@@ -207,6 +274,8 @@ const buildGraph = (graph: AppGraph) => {
         source: edge.source,
         target: edge.target,
         animated: true,
+        label: edge.label,
+        labelStyle: { fill: '#e2e8f0', fontSize: 12, fontWeight: 600 },
         style: { stroke: '#38bdf8' },
       });
     }
@@ -218,87 +287,42 @@ const buildGraph = (graph: AppGraph) => {
   return { nodes: createLayout(nodes, edges), edges };
 };
 
-const formatDate = (value: string) =>
-  new Date(value).toLocaleString('ru-RU', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
-
-const buildHighlightSet = (path: string[]) => {
-  const nodeIds = new Set(path);
-  const edgeIds = new Set<string>();
-
-  path.forEach((nodeId, index) => {
-    const next = path[index + 1];
-    if (next) {
-      edgeIds.add(`${nodeId}->${next}`);
-    }
-  });
-
-  return { nodeIds, edgeIds };
-};
-
 const App = () => {
   const { nodes: baseNodes, edges: baseEdges } = useMemo(() => buildGraph(mockGraph), []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [highlightedSuite, setHighlightedSuite] = useState<RelatedTestSuite | null>(null);
 
   const selectedNode = useMemo(
     () => mockGraph.nodes.find((node) => node.id === selectedNodeId) ?? null,
     [selectedNodeId],
   );
 
-  const highlight = useMemo(
-    () => (highlightedSuite ? buildHighlightSet(highlightedSuite.path) : null),
-    [highlightedSuite],
-  );
-
-  const nodes = useMemo(() => {
-    if (!highlight) {
-      return baseNodes;
-    }
-
-    return baseNodes.map((node) => {
-      const isHighlighted = highlight.nodeIds.has(node.id);
-      return {
-        ...node,
-        className: `${node.className} ${
-          isHighlighted ? 'ring-2 ring-sky-400 ring-offset-2 ring-offset-slate-950' : ''
-        }`,
-      };
-    });
-  }, [baseNodes, highlight]);
-
-  const edges = useMemo(() => {
-    if (!highlight) {
-      return baseEdges;
-    }
-
-    return baseEdges.map((edge) => {
-      const isHighlighted = highlight.edgeIds.has(edge.id);
-      return {
-        ...edge,
-        style: {
-          ...edge.style,
-          stroke: isHighlighted ? '#38bdf8' : '#334155',
-          strokeWidth: isHighlighted ? 2.5 : 1.2,
-        },
-      };
-    });
-  }, [baseEdges, highlight]);
+  const nodes = useMemo(() => baseNodes, [baseNodes]);
+  const edges = useMemo(() => baseEdges, [baseEdges]);
 
   const handleNodeClick: NodeMouseHandler = (_, node) => {
     setSelectedNodeId(node.id);
-    setHighlightedSuite(null);
   };
 
   const handleCloseSidebar = () => {
     setSelectedNodeId(null);
-    setHighlightedSuite(null);
   };
 
   return (
     <div className="h-screen w-screen bg-slate-950">
+      <div className="absolute left-6 top-6 z-10 rounded-2xl border border-slate-800 bg-slate-950/90 px-4 py-3 text-slate-100 shadow-lg backdrop-blur">
+        <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Default Graph</p>
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200">
+            env: {mockGraph.environment}
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200">
+            persona: {mockGraph.persona}
+          </span>
+          <span className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200">
+            version: {mockGraph.version}
+          </span>
+        </div>
+      </div>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -322,6 +346,7 @@ const App = () => {
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Node</p>
                 <h2 className="text-2xl font-semibold text-white">{selectedNode.label}</h2>
                 <p className="mt-1 text-sm text-slate-300">Type: {selectedNode.type}</p>
+                <p className="mt-1 text-xs text-slate-400">ID: {selectedNode.id}</p>
               </div>
               <button
                 type="button"
@@ -334,28 +359,21 @@ const App = () => {
 
             <div className="space-y-4 text-sm text-slate-200">
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Personas</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedNode.personas.map((persona) => (
-                    <span
-                      key={persona}
-                      className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200"
-                    >
-                      {persona}
-                    </span>
-                  ))}
-                </div>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Path</p>
+                <p className="mt-2 rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-sm text-slate-100">
+                  {selectedNode.path}
+                </p>
               </div>
 
               <div>
-                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Environments</p>
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">States</p>
                 <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedNode.environments.map((env) => (
+                  {selectedNode.states.map((state) => (
                     <span
-                      key={env}
+                      key={state}
                       className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200"
                     >
-                      {env}
+                      {state}
                     </span>
                   ))}
                 </div>
@@ -363,63 +381,55 @@ const App = () => {
 
               <div>
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Artifacts</p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {selectedNode.artifacts.map((artifact) => (
-                    <span
-                      key={artifact}
-                      className="rounded-full border border-slate-700 bg-slate-900 px-3 py-1 text-xs text-slate-200"
-                    >
-                      {artifact}
-                    </span>
-                  ))}
-                </div>
+                {Object.keys(selectedNode.artifacts).length === 0 ? (
+                  <p className="mt-2 text-xs text-slate-400">No artifacts</p>
+                ) : (
+                  <div className="mt-2 flex flex-col gap-2">
+                    {Object.entries(selectedNode.artifacts).map(([name, value]) => (
+                      <div
+                        key={name}
+                        className="rounded-lg border border-slate-800 bg-slate-900/70 px-3 py-2 text-xs text-slate-200"
+                      >
+                        <span className="text-slate-400">{name}:</span> {value}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <span className="text-xs uppercase tracking-[0.2em] text-slate-400">Coverage</span>
-                <span
-                  className={`rounded-full px-2 py-1 text-xs font-semibold ${
-                    selectedNode.coverage
-                      ? 'bg-emerald-500/20 text-emerald-200'
-                      : 'bg-rose-500/20 text-rose-200'
-                  }`}
-                >
-                  {selectedNode.coverage ? 'Covered' : 'Not covered'}
-                </span>
+              <div className="rounded-xl border border-slate-800 bg-slate-900/70 p-3">
+                <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Coverage</p>
+                <div className="mt-2 flex flex-wrap gap-2 text-xs text-slate-200">
+                  <span
+                    className={`rounded-full px-2 py-1 font-semibold ${
+                      selectedNode.coverage.visited
+                        ? 'bg-emerald-500/20 text-emerald-200'
+                        : 'bg-rose-500/20 text-rose-200'
+                    }`}
+                  >
+                    {selectedNode.coverage.visited ? 'Visited' : 'Not visited'}
+                  </span>
+                  <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1">
+                    visits: {selectedNode.coverage.visits}
+                  </span>
+                  <span className="rounded-full border border-slate-700 bg-slate-900 px-2 py-1">
+                    score: {Math.round(selectedNode.coverage.coverageScore * 100)}%
+                  </span>
+                </div>
               </div>
             </div>
 
             <div className="flex flex-1 flex-col">
-              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Related Test Suites</p>
-              <div className="mt-3 flex flex-1 flex-col gap-3 overflow-y-auto pr-2">
-                {selectedNode.relatedTestSuites.map((suite) => {
-                  const isPassed = suite.lastStatus === 'passed';
-                  return (
-                    <button
-                      key={suite.id}
-                      type="button"
-                      onMouseEnter={() => setHighlightedSuite(suite)}
-                      onMouseLeave={() => setHighlightedSuite(null)}
-                      className="rounded-xl border border-slate-800 bg-slate-900/70 p-4 text-left transition hover:border-slate-600"
-                    >
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-sm font-semibold text-white">
-                          {suite.id} {suite.name}
-                        </p>
-                        <span
-                          className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
-                            isPassed ? 'bg-emerald-500/20 text-emerald-200' : 'bg-rose-500/20 text-rose-200'
-                          }`}
-                        >
-                          {isPassed ? '✅' : '❌'}
-                        </span>
-                      </div>
-                      <p className="mt-2 text-xs text-slate-400">
-                        Last run: <span className="text-slate-200">{formatDate(suite.lastRun)}</span>
-                      </p>
-                    </button>
-                  );
-                })}
+              <p className="text-xs uppercase tracking-[0.2em] text-slate-400">Metadata</p>
+              <div className="mt-3 flex flex-1 flex-col gap-2 overflow-y-auto pr-2">
+                {Object.entries(selectedNode.metadata).map(([key, value]) => (
+                  <div key={key} className="rounded-lg border border-slate-800 bg-slate-900/70 p-3 text-xs">
+                    <p className="text-slate-400">{key}</p>
+                    <p className="mt-1 text-slate-100">
+                      {Array.isArray(value) ? value.join(', ') : String(value)}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           </div>
